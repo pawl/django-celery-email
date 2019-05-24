@@ -1,3 +1,4 @@
+import base64
 import json
 import os.path
 from email.mime.image import MIMEImage
@@ -62,6 +63,26 @@ class UtilTests(TestCase):
             'test', 'Testing with Celery! w00t!!', 'from@example.com',
             ['to@example.com'])
         msg.attach('image.png', file_contents)
+        self.check_json_of_msg(msg)
+
+    @override_settings(CELERY_EMAIL_ATTACHMENT_COMPRESSION='blah')
+    def test_email_with_attachment_compression(self):
+        msg = mail.EmailMessage(
+            'test', 'Testing with Celery! w00t!!', 'from@example.com',
+            ['to@example.com'])
+        csv_contents = '111111111111111'
+        msg.attach('image.png', csv_contents, 'text/csv')
+
+        # TEST: attachment is compressed
+        serialized_email = email_to_dict(msg)
+        compressed_csv_contents = serialized_email['attachments'][0][1]
+        decoded_compressed_csv_contents = base64.b64decode(compressed_csv_contents)
+        self.assertNotEqual(decoded_compressed_csv_contents, csv_contents)
+
+        # TEST: decompressed attachment isn't compressed
+        deserialized_email = dict_to_email(serialized_email)
+        self.assertEqual(csv_contents, deserialized_email.attachments[0][1])
+
         self.check_json_of_msg(msg)
 
     def test_email_with_mime_attachment(self):

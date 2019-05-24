@@ -65,9 +65,12 @@ def email_to_dict(message):
             # For a mimetype starting with text/, content is expected to be a string.
             if six.PY3 and isinstance(binary_contents, str):
                 binary_contents = binary_contents.encode()
-        contents = base64.b64encode(binary_contents).decode('ascii')
+
+        # compression is more efficient if done before base64 encoding
         if settings.CELERY_EMAIL_ATTACHMENT_COMPRESSION:
-            contents = compress(contents, settings.CELERY_EMAIL_ATTACHMENT_COMPRESSION)
+            binary_contents, _ = compress(binary_contents, settings.CELERY_EMAIL_ATTACHMENT_COMPRESSION)
+
+        contents = base64.b64encode(binary_contents).decode('ascii')
         message_dict['attachments'].append((filename, contents, mimetype))
 
     if settings.CELERY_EMAIL_MESSAGE_EXTRA_ATTRIBUTES:
@@ -87,15 +90,15 @@ def dict_to_email(messagedict):
             if attr in messagedict:
                 extra_attrs[attr] = messagedict.pop(attr)
 
+    attachment_compression = messagedict.pop('attachment_compression', None)
     attachments = messagedict.pop('attachments')
     messagedict['attachments'] = []
     for attachment in attachments:
         filename, contents, mimetype = attachment
         contents = base64.b64decode(contents.encode('ascii'))
 
-        attachment_compression = messagedict.get('attachment_compression')
         if attachment_compression:
-            decompress(contents, attachment_compression)
+            contents = decompress(contents, attachment_compression)
 
         # For a mimetype starting with text/, content is expected to be a string.
         if mimetype and mimetype.startswith('text/'):

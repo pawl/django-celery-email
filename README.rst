@@ -43,6 +43,10 @@ change ``EMAIL_BACKEND`` to ``CELERY_EMAIL_BACKEND``, and then add the new
 
 Mass email are sent in chunks of size ``CELERY_EMAIL_CHUNK_SIZE`` (defaults to 10).
 
+Email attachments can be compressed before they are serialized and sent to the queue
+by using ``CELERY_EMAIL_ATTACHMENT_COMPRESSION = 'gzip'`` (or any other compression
+format supported by Celery). This can save some memory and reduce network overhead.
+
 If you need to set any of the settings (attributes) you'd normally be able to set on a
 `Celery Task`_ class had you written it yourself, you may specify them in a ``dict``
 in the ``CELERY_EMAIL_TASK_CONFIG`` setting::
