@@ -5,6 +5,7 @@ from email.mime.base import MIMEBase
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives, EmailMessage
 from django.utils import six
+from kombu.compression import compress, decompress
 
 
 def chunked(iterator, chunksize):
@@ -50,6 +51,9 @@ def email_to_dict(message):
     if message.mixed_subtype != EmailMessage.mixed_subtype:
         message_dict["mixed_subtype"] = message.mixed_subtype
 
+    if settings.CELERY_EMAIL_ATTACHMENT_COMPRESSION:
+        message_dict['attachment_compression'] = settings.CELERY_EMAIL_ATTACHMENT_COMPRESSION
+
     attachments = message.attachments
     for attachment in attachments:
         if isinstance(attachment, MIMEBase):
@@ -62,6 +66,8 @@ def email_to_dict(message):
             if six.PY3 and isinstance(binary_contents, str):
                 binary_contents = binary_contents.encode()
         contents = base64.b64encode(binary_contents).decode('ascii')
+        if settings.CELERY_EMAIL_ATTACHMENT_COMPRESSION:
+            contents = compress(contents, settings.CELERY_EMAIL_ATTACHMENT_COMPRESSION)
         message_dict['attachments'].append((filename, contents, mimetype))
 
     if settings.CELERY_EMAIL_MESSAGE_EXTRA_ATTRIBUTES:
@@ -74,43 +80,55 @@ def email_to_dict(message):
 
 def dict_to_email(messagedict):
     messagedict = copy.deepcopy(messagedict)
+
     extra_attrs = {}
     if settings.CELERY_EMAIL_MESSAGE_EXTRA_ATTRIBUTES:
         for attr in settings.CELERY_EMAIL_MESSAGE_EXTRA_ATTRIBUTES:
             if attr in messagedict:
                 extra_attrs[attr] = messagedict.pop(attr)
+
     attachments = messagedict.pop('attachments')
     messagedict['attachments'] = []
     for attachment in attachments:
         filename, contents, mimetype = attachment
         contents = base64.b64decode(contents.encode('ascii'))
 
+        attachment_compression = messagedict.get('attachment_compression')
+        if attachment_compression:
+            decompress(contents, attachment_compression)
+
         # For a mimetype starting with text/, content is expected to be a string.
         if mimetype and mimetype.startswith('text/'):
             contents = contents.decode()
 
         messagedict['attachments'].append((filename, contents, mimetype))
+
     if isinstance(messagedict, dict) and "content_subtype" in messagedict:
         content_subtype = messagedict["content_subtype"]
         del messagedict["content_subtype"]
     else:
         content_subtype = None
+
     if isinstance(messagedict, dict) and "mixed_subtype" in messagedict:
         mixed_subtype = messagedict["mixed_subtype"]
         del messagedict["mixed_subtype"]
     else:
         mixed_subtype = None
+
     if hasattr(messagedict, 'from_email'):
         ret = messagedict
     elif 'alternatives' in messagedict:
         ret = EmailMultiAlternatives(**messagedict)
     else:
         ret = EmailMessage(**messagedict)
+
     for attr, val in extra_attrs.items():
         setattr(ret, attr, val)
+
     if content_subtype:
         ret.content_subtype = content_subtype
         messagedict["content_subtype"] = content_subtype  # bring back content subtype for 'retry'
+
     if mixed_subtype:
         ret.mixed_subtype = mixed_subtype
         messagedict["mixed_subtype"] = mixed_subtype  # bring back mixed subtype for 'retry'
